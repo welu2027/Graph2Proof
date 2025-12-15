@@ -1,4 +1,7 @@
 if __name__ == "__main__":
+    import os
+    os.environ["VLLM_ATTENTION_BACKEND"] = "FLASHATTN"  # Critical fix
+
     from transformers import AutoTokenizer
     import torch
     import pandas as pd
@@ -7,7 +10,6 @@ if __name__ == "__main__":
     from vllm import LLM, SamplingParams
     from tqdm import tqdm
     import argparse
-    import os
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
@@ -15,68 +17,35 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="fimo")
     args = parser.parse_args()
 
-    model_path = args.model
-    data_file = args.data
-
     os.makedirs(args.output, exist_ok=True)
 
-    df = pd.read_json(data_file, lines=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-
-    prompt_template = '''<question>
-
-Use natural language and LaTeX in the proof. If the statement is proved, add \\boxed{proved} at the end of your answer. If it's disproved, add \\boxed{disproved} at the end of your answer.'''
+    df = pd.read_json(args.data, lines=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     prompts = []
     for p in df.prompt:
-        messages = [
-            {"role": "user", "content": prompt_template.replace("<question>", p)}
-        ]
+        messages = [{"role": "user", "content": p}]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        if tokenizer.bos_token is not None and text.startswith(tokenizer.bos_token):
-            text = text[len(tokenizer.bos_token):]
         prompts.append(text)
-    print(prompts[0])
-    print('---' * 10)
 
     model = LLM(
-        model=model_path,
-        dtype=torch.float16,  # Use float16 to reduce memory footprint
-        tensor_parallel_size=1  # Single GPU to avoid MP issues and OOM
+        model=args.model,
+        dtype=torch.float16,
+        tensor_parallel_size=1,
+        max_model_len=32768,
     )
-    sampling_params = SamplingParams(temperature=0, max_tokens=32000)
-    print("Starting generation (vLLM single-GPU mode)...")
+
+    sampling_params = SamplingParams(temperature=0, max_tokens=16000)
+
     outputs = model.generate(prompts, sampling_params)
 
-    generation = []
-    stop_reasons = []
-    for output in tqdm(outputs, desc="Processing generations", total=len(prompts)):
-        generation.append(output.outputs[0].text)
-        stop_reasons.append(output.outputs[0].finish_reason)
-
-    print(generation[0])
-    print('---' * 10)
-    print(Counter(stop_reasons))
+    generation = [out.outputs[0].text for out in tqdm(outputs, desc="Generations", total=len(prompts))]
 
     df["generation"] = generation
-    df.to_json(f"{args.output}/{os.path.basename(model_path)}.jsonl", orient='records', lines=True)
+    df.to_json(f"{args.output}/output.jsonl", orient='records', lines=True)
 
-    def extract_answer(s):
-        s = s.lower()
-        if "\\boxed{proved}" in s or "\\boxed{\\text{proved}}" in s:
-            return 1
-        if "\\boxed{disproved}" in s or "\\boxed{\\text{disproved}}" in s:
-            return 0
-        return -1
-
-    df["prediction"] = df.generation.apply(extract_answer)
-    print('Answer distribution:', Counter(df.answer))
-    print('Prediction distribution:', Counter(df.prediction))
-
-    accs = []
-    for problem in set(df.problem_name):
-        df_ = df[df.problem_name == problem]
-        accs.append((df_.answer == df_.prediction).prod())
-
+    # Extraction and scoring (same as before)
+    df["prediction"] = df.generation.apply(lambda s: 1 if "\\boxed{proved}" in s.lower() else (0 if "\\boxed{disproved}" in s.lower() else -1))
+    accs = [ (df[df.problem_name == p].answer == df[df.problem_name == p].prediction).all() for p in df.problem_name.unique() ]
     score = round(np.mean(accs) * 100, 4)
-    print(f'Outcome score on {os.path.basename(args.data).split(".")[0]}:', score)
+    print(f'Outcome score on fimo:', score)
