@@ -1,6 +1,6 @@
 if __name__ == "__main__":
     import os
-    os.environ["VLLM_ATTENTION_BACKEND"] = "FLASHATTN"  # Critical fix
+    os.environ["VLLM_ATTENTION_BACKEND"] = "FLASHATTN"  
 
     from transformers import AutoTokenizer
     import torch
@@ -44,7 +44,6 @@ if __name__ == "__main__":
     df["generation"] = generation
     df.to_json(f"{args.output}/output.jsonl", orient='records', lines=True)
 
-    # Extraction and scoring (same as before)
     df["prediction"] = df.generation.apply(lambda s: 1 if "\\boxed{proved}" in s.lower() else (0 if "\\boxed{disproved}" in s.lower() else -1))
     accs = [ (df[df.problem_name == p].answer == df[df.problem_name == p].prediction).all() for p in df.problem_name.unique() ]
     score = round(np.mean(accs) * 100, 4)
