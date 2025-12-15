@@ -70,4 +70,5 @@ accs = []
 for problem in set(df.problem_name):
     df_ = df[df.problem_name==problem]
     accs.append((df_.answer==df_.prediction).prod())
-print(f'Outcome score on {args.data.split('/')[-1].split('.')[0]}:', (np.mean(accs).round(4)*100).round(4))
+score = round(np.mean(accs) * 100, 4)
+print(f"Outcome score on {args.data.split('/')[-1].split('.')[0]}: {score}")
