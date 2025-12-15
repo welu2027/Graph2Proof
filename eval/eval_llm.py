@@ -32,7 +32,7 @@ for p in df.prompt:
         {"role": "user", "content": prompt_template.replace("<question>", p)}
     ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    if text.startswith(tokenizer.bos_token):
+    if tokenizer.bos_token is not None and text.startswith(tokenizer.bos_token):
         text = text[len(tokenizer.bos_token):]
     prompts.append(text)
 print(prompts[0])
