@@ -1,6 +1,6 @@
 if __name__ == "__main__":
     import os
-    os.environ["VLLM_ATTENTION_BACKEND"] = "FLASHATTN"  
+    os.environ["VLLM_ATTENTION_BACKEND"] = "FLASH_ATTN"  
 
     from transformers import AutoTokenizer
     import torch
