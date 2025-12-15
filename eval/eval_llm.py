@@ -28,7 +28,7 @@ if __name__ == "__main__":
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         prompts.append(text)
     #prompts = sorted(prompts, key=lambda p: len(p["prompt"]))
-    prompts = prompts[:160]
+    prompts = prompts[:150]
 
     model = LLM(
         model=args.model,
