@@ -46,7 +46,7 @@ Use natural language and LaTeX in the proof. If the statement is proved, add \\b
 
     model = LLM(
         model=model_path,
-        dtype=torch.bfloat16,
+        dtype=torch.float16,
         tensor_parallel_size=1
     )
     sampling_params = SamplingParams(temperature=0, max_tokens=32000)
