@@ -1,14 +1,11 @@
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, set_seed
 import torch
 import pandas as pd
 import numpy as np
 from collections import Counter
 from vllm import LLM, SamplingParams
-from tqdm import tqdm
 
 import argparse
-import os
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="deeptheorem-7b/global_step_1000")
 parser.add_argument("--data", type=str, default="data/fimo.jsonl")
@@ -17,8 +14,6 @@ args = parser.parse_args()
 
 model_path = args.model
 data_file = args.data
-
-os.makedirs(args.output, exist_ok=True)
 
 df = pd.read_json(data_file, lines=True)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -30,7 +25,6 @@ for p in df.prompt:
     ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     prompts.append(text)
-
 print(prompts[0])
 print('---' * 10)
 
@@ -40,16 +34,9 @@ model = LLM(
     tensor_parallel_size=4
 )
 sampling_params = SamplingParams(temperature=0, max_tokens=16000)
-
-print("Starting batched generation with vLLM (progress shown below)...")
 outputs = model.generate(prompts, sampling_params)
-
-generation = []
-stop_reasons = []
-for output in tqdm(outputs, desc="Processing completed generations", total=len(prompts)):
-    generation.append(output.outputs[0].text)
-    stop_reasons.append(output.outputs[0].finish_reason)
-
+generation = [output.outputs[0].text for output in outputs]
+stop_reasons = [output.outputs[0].finish_reason for output in outputs]
 print(generation[0])
 print('---' * 10)
 print(Counter(stop_reasons))
@@ -64,15 +51,12 @@ def extract_answer(s):
     if "\\boxed{disproved}" in s or "\\boxed{\\text{disproved}}" in s:
         return 0
     return -1
-
 df["prediction"] = df.generation.apply(extract_answer)
 print('Answer distribution:', Counter(df.answer))
 print('Prediction distribution:', Counter(df.prediction))
 
 accs = []
 for problem in set(df.problem_name):
-    df_ = df[df.problem_name == problem]
-    accs.append((df_.answer == df_.prediction).prod())
-
-score = round(np.mean(accs) * 100, 4)
-print(f"Outcome score on {args.data.split('/')[-1].split('.')[0]}: {score}")
+    df_ = df[df.problem_name==problem]
+    accs.append((df_.answer==df_.prediction).prod())
+print(f'Outcome score on {args.data.split('/')[-1].split('.')[0]}:', (np.mean(accs).round(4)*100).round(4))
