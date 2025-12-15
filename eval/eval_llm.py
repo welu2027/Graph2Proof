@@ -41,7 +41,7 @@ print('---' * 10)
 model = LLM(
     model=model_path,
     dtype=torch.bfloat16,
-    tensor_parallel_size=4
+    tensor_parallel_size=2
 )
 sampling_params = SamplingParams(temperature=0, max_tokens=32000)
 outputs = model.generate(prompts, sampling_params)
