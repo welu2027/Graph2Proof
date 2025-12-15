@@ -27,13 +27,15 @@ if __name__ == "__main__":
         messages = [{"role": "user", "content": p}]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         prompts.append(text)
+    #prompts = sorted(prompts, key=lambda p: len(p["prompt"]))
     prompts = prompts[:160]
 
     model = LLM(
         model=args.model,
         dtype=torch.float16,
         tensor_parallel_size=1,
-        max_model_len=32768,
+        max_model_len=32768
+        #max_tokens=512
     )
 
     sampling_params = SamplingParams(temperature=0, max_tokens=16000)
