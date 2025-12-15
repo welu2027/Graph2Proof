@@ -27,6 +27,7 @@ if __name__ == "__main__":
         messages = [{"role": "user", "content": p}]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         prompts.append(text)
+    prompts = prompts[:160]
 
     model = LLM(
         model=args.model,
