@@ -1,5 +1,5 @@
 if __name__ == "__main__":
-    from transformers import AutoTokenizer, set_seed
+    from transformers import AutoTokenizer
     import torch
     import pandas as pd
     import numpy as np
@@ -30,11 +30,6 @@ Use natural language and LaTeX in the proof. If the statement is proved, add \\b
     prompts = []
     for p in df.prompt:
         messages = [
-            # no system prompt: r1 series, other deepseek, qwq
-            # {"role": "system", "content": "You are a bot that produces proofs for mathematical statements."},  # llama3 instruct
-            # {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},  # qwen2.5 instruct
-            # {"role": "system", "content": "Please reason step by step, and put your final answer within \\boxed{}."},  # qwen2.5 math
-            # {"role": "system", "content": "You are a helpful and harmless assistant. You are Qwen developed by Alibaba. You should think step-by-step."},  # qwq-preview
             {"role": "user", "content": prompt_template.replace("<question>", p)}
         ]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -46,8 +41,8 @@ Use natural language and LaTeX in the proof. If the statement is proved, add \\b
 
     model = LLM(
         model=model_path,
-        dtype=torch.float16,
-        tensor_parallel_size=1
+        dtype=torch.float16,  # Use float16 to reduce memory footprint
+        tensor_parallel_size=1  # Single GPU to avoid MP issues and OOM
     )
     sampling_params = SamplingParams(temperature=0, max_tokens=32000)
     print("Starting generation (vLLM single-GPU mode)...")
