@@ -71,17 +71,36 @@ if __name__ == "__main__":
                 batch_outputs = model.generate(batch_prompts, sampling_params)
                 batch_generations = [out.outputs[0].text for out in batch_outputs]
                 all_generations.extend(batch_generations)
-                print(f"Batch {i//args.batch_size + 1}: {len(batch_generations)} completed")
+                print(f"\nBatch {i//args.batch_size + 1}: {len(batch_generations)} completed")
             
         except TimeoutError as e:
-            print(f"TIMEOUT in batch {i//args.batch_size + 1}: {e}")
+            print(f"\nTIMEOUT in batch {i//args.batch_size + 1}: {e}")
             all_generations.extend(["TIMEOUT"] * len(batch_prompts))
             failed_indices.extend(range(i, i + len(batch_prompts)))
             
         except Exception as e:
-            print(f"ERROR in batch {i//args.batch_size + 1}: {e}")
+            print(f"\nERROR in batch {i//args.batch_size + 1}: {e}")
             all_generations.extend(["ERROR"] * len(batch_prompts))
             failed_indices.extend(range(i, i + len(batch_prompts)))
+        
+        df_temp = df.iloc[:len(all_generations)].copy()
+        df_temp["generation"] = all_generations
+        df_temp["prediction"] = df_temp.generation.apply(extract_answer)
+        
+        accs_so_far = []
+        for problem in df_temp.problem_name.unique():
+            df_problem = df_temp[df_temp.problem_name == problem]
+            if (df_problem.prediction == -1).any():
+                continue
+            accs_so_far.append((df_problem.answer == df_problem.prediction).all())
+        
+        if accs_so_far:
+            running_score = round(np.mean(accs_so_far) * 100, 2)
+            valid_problems = len(accs_so_far)
+            total_problems = len(df.problem_name.unique())
+            print(f"Running accuracy: {running_score}% ({valid_problems}/{total_problems} problems evaluated)")
+        print(f"Valid predictions so far: {len([p for p in df_temp.prediction if p != -1])}/{len(df_temp)}")
+        print("-" * 60)
 
     if failed_indices:
         print(f"WARNING: {len(failed_indices)} prompts failed: {failed_indices}")
