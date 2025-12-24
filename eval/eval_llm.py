@@ -114,4 +114,4 @@ if __name__ == "__main__":
     print(f'Outcome score on fimo: {score}%')
     print(f'Total prompts: {len(all_generations)}')
     print(f'Failed/Timeout: {len(failed_indices)}')
-    print(f'Valid predictions: {len([p for p in df.prediction if p != -1])
+    print(f'Valid predictions: {len([p for p in df.prediction if p != -1])}')
