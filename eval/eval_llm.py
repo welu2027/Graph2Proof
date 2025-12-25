@@ -30,7 +30,7 @@ if __name__ == "__main__":
     model = LLM(
         model=args.model,
         dtype=torch.float16,
-        tensor_parallel_size=1,
+        tensor_parallel_size=2,
         max_model_len=32768
     )
 
@@ -38,15 +38,16 @@ if __name__ == "__main__":
 
     generation = []
     total_prompts = len(prompts)
-    checkpoint = int(total_prompts * 0.94)
+    checkpoint_idx = int(total_prompts * 0.93)
 
     outputs = model.generate(prompts, sampling_params)
     for i, out in enumerate(tqdm(outputs, desc="Generations", total=total_prompts)):
         generation.append(out.outputs[0].text)
-        if i + 1 == checkpoint:
+
+        if i + 1 == checkpoint_idx:
             df["generation"] = generation
             df["prediction"] = df.generation.apply(
-                lambda s: 1 if "\\boxed{proved}" in s.lower() else 
+                lambda s: 1 if "\\boxed{proved}" in s.lower() else
                           (0 if "\\boxed{disproved}" in s.lower() else -1)
             )
             accs = [
