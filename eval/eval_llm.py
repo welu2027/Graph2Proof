@@ -6,17 +6,14 @@ if __name__ == "__main__":
     import torch
     import pandas as pd
     import numpy as np
-    from collections import Counter
     from vllm import LLM, SamplingParams
     from tqdm import tqdm
     import argparse
-    import signal
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
     parser.add_argument("--output", type=str, default="fimo")
-    parser.add_argument("--timeout", type=int, default=120)
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -39,23 +36,25 @@ if __name__ == "__main__":
 
     sampling_params = SamplingParams(temperature=0, max_tokens=16000)
 
-    def timeout_handler(signum, frame):
-        raise TimeoutError
-
     generation = []
-    for prompt in tqdm(prompts, desc="Generations"):
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(args.timeout)
-        try:
-            out = model.generate([prompt], sampling_params)
-            gen_text = out[0].outputs[0].text
-        except TimeoutError:
-            gen_text = "TIMEOUT"
-        except Exception as e:
-            gen_text = f"ERROR: {str(e)}"
-        finally:
-            signal.alarm(0)  # disable alarm
-        generation.append(gen_text)
+    total_prompts = len(prompts)
+    checkpoint = int(total_prompts * 0.94)
+
+    outputs = model.generate(prompts, sampling_params)
+    for i, out in enumerate(tqdm(outputs, desc="Generations", total=total_prompts)):
+        generation.append(out.outputs[0].text)
+        if i + 1 == checkpoint:
+            df["generation"] = generation
+            df["prediction"] = df.generation.apply(
+                lambda s: 1 if "\\boxed{proved}" in s.lower() else 
+                          (0 if "\\boxed{disproved}" in s.lower() else -1)
+            )
+            accs = [
+                (df[df.problem_name == p].answer == df[df.problem_name == p].prediction).all()
+                for p in df.problem_name.unique()
+            ]
+            score = round(np.mean(accs) * 100, 4)
+            print(f"Checkpoint: 94% prompts processed. Interim outcome score: {score}%")
 
     df["generation"] = generation
     df.to_json(f"{args.output}/output.jsonl", orient='records', lines=True)
@@ -68,4 +67,4 @@ if __name__ == "__main__":
         for p in df.problem_name.unique()
     ]
     score = round(np.mean(accs) * 100, 4)
-    print(f'Outcome score on fimo:', score)
+    print(f'Final outcome score on fimo:', score)
