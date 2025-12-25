@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
 parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
 parser.add_argument("--output", type=str, default="fimo")
-parser.add_argument("--timeout", type=int, default=120)  # seconds per prompt
+parser.add_argument("--timeout", type=int, default=120)
 args = parser.parse_args()
 
 os.makedirs(args.output, exist_ok=True)
@@ -38,7 +38,6 @@ model = LLM(
 sampling_params = SamplingParams(temperature=0, max_tokens=16000)
 
 def generate_prompt(text):
-    """Wrapper for vLLM generation"""
     out = model.generate([text], sampling_params)
     return out[0].outputs[0].text
 
@@ -49,10 +48,9 @@ with ThreadPoolExecutor(max_workers=2) as executor:
         try:
             gen_text = future.result(timeout=args.timeout)
         except TimeoutError:
-            gen_text = "TIMEOUT"  # handle timeouts
+            gen_text = "TIMEOUT"
         generation.append(gen_text)
 
-# Ensure ordering matches original prompts
 generation = [generation[i] for i in range(len(prompts))]
 
 df["generation"] = generation
