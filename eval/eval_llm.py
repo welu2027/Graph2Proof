@@ -27,6 +27,14 @@ if __name__ == "__main__":
     df = pd.read_json(args.data, lines=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
+    def extract_answer(s):
+        s = s.lower()
+        if "\\boxed{proved}" in s or "\\boxed{\\text{proved}}" in s:
+            return 1
+        if "\\boxed{disproved}" in s or "\\boxed{\\text{disproved}}" in s:
+            return 0
+        return -1
+
     prompts = []
     for p in df.prompt:
         messages = [{"role": "user", "content": p}]
@@ -102,20 +110,10 @@ if __name__ == "__main__":
         print(f"Valid predictions so far: {len([p for p in df_temp.prediction if p != -1])}/{len(df_temp)}")
         print("-" * 60)
 
-    if failed_indices:
-        print(f"WARNING: {len(failed_indices)} prompts failed: {failed_indices}")
-
     df["generation"] = all_generations
     df.to_json(f"{args.output}/output_intermediate.jsonl", orient='records', lines=True)
-    print(f"Saved intermediate results to {args.output}/output_intermediate.jsonl")
 
-    def extract_answer(s):
-        s = s.lower()
-        if "\\boxed{proved}" in s or "\\boxed{\\text{proved}}" in s:
-            return 1
-        if "\\boxed{disproved}" in s or "\\boxed{\\text{disproved}}" in s:
-            return 0
-        return -1
+    print(f"\nSaved intermediate results to {args.output}/output_intermediate.jsonl")
 
     df["prediction"] = df.generation.apply(extract_answer)
     
