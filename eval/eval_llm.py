@@ -10,11 +10,13 @@ if __name__ == "__main__":
     from vllm import LLM, SamplingParams
     from tqdm import tqdm
     import argparse
+    import signal
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
     parser.add_argument("--output", type=str, default="fimo")
+    parser.add_argument("--timeout", type=int, default=120)
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -27,27 +29,43 @@ if __name__ == "__main__":
         messages = [{"role": "user", "content": p}]
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         prompts.append(text)
-    #prompts = sorted(prompts, key=lambda p: len(p["prompt"]))
-    #prompts = prompts[:150]
 
     model = LLM(
         model=args.model,
         dtype=torch.float16,
         tensor_parallel_size=1,
         max_model_len=32768
-        #max_tokens=512
     )
 
     sampling_params = SamplingParams(temperature=0, max_tokens=16000)
 
-    outputs = model.generate(prompts, sampling_params)
+    def timeout_handler(signum, frame):
+        raise TimeoutError
 
-    generation = [out.outputs[0].text for out in tqdm(outputs, desc="Generations", total=len(prompts))]
+    generation = []
+    for prompt in tqdm(prompts, desc="Generations"):
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(args.timeout)
+        try:
+            out = model.generate([prompt], sampling_params)
+            gen_text = out[0].outputs[0].text
+        except TimeoutError:
+            gen_text = "TIMEOUT"
+        except Exception as e:
+            gen_text = f"ERROR: {str(e)}"
+        finally:
+            signal.alarm(0)  # disable alarm
+        generation.append(gen_text)
 
     df["generation"] = generation
     df.to_json(f"{args.output}/output.jsonl", orient='records', lines=True)
 
-    df["prediction"] = df.generation.apply(lambda s: 1 if "\\boxed{proved}" in s.lower() else (0 if "\\boxed{disproved}" in s.lower() else -1))
-    accs = [ (df[df.problem_name == p].answer == df[df.problem_name == p].prediction).all() for p in df.problem_name.unique() ]
+    df["prediction"] = df.generation.apply(
+        lambda s: 1 if "\\boxed{proved}" in s.lower() else (0 if "\\boxed{disproved}" in s.lower() else -1)
+    )
+    accs = [
+        (df[df.problem_name == p].answer == df[df.problem_name == p].prediction).all()
+        for p in df.problem_name.unique()
+    ]
     score = round(np.mean(accs) * 100, 4)
     print(f'Outcome score on fimo:', score)
