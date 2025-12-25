@@ -45,8 +45,9 @@ if __name__ == "__main__":
         model=args.model,
         dtype=torch.float16,
         tensor_parallel_size=2,
-        max_model_len=32768,
-        gpu_memory_utilization=0.90
+        max_model_len=16384,
+        gpu_memory_utilization=0.75,
+        max_num_seqs=128
     )
 
     sampling_params = SamplingParams(
