@@ -30,7 +30,7 @@ if __name__ == "__main__":
     model = LLM(
         model=args.model,
         dtype=torch.float16,
-        tensor_parallel_size=2,
+        tensor_parallel_size=1,
         max_model_len=32768
     )
 
