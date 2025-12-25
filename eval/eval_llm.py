@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
     parser.add_argument("--output", type=str, default="fimo")
-    parser.add_argument("--timeout", type=int, default=120)  # max seconds per prompt
+    parser.add_argument("--timeout", type=int, default=120) 
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -33,6 +33,7 @@ if __name__ == "__main__":
         model=args.model,
         dtype=torch.float16,
         tensor_parallel_size=2,
+        gpu_memory_utilization=0.8,
         max_model_len=32768
     )
 
@@ -59,7 +60,6 @@ if __name__ == "__main__":
                 gen_text = "TIMEOUT"
             generation.append(gen_text)
 
-            # Interim accuracy at ~94% processed
             if len(generation) == checkpoint_idx:
                 df["generation"] = generation
                 df["prediction"] = df.generation.apply(
@@ -73,7 +73,6 @@ if __name__ == "__main__":
                 score = round(np.mean(accs) * 100, 4)
                 print(f"Checkpoint: 94% prompts processed. Interim outcome score: {score}%")
 
-    # Final output
     df["generation"] = generation
     df.to_json(f"{args.output}/output.jsonl", orient='records', lines=True)
 
