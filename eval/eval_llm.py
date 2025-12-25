@@ -112,7 +112,6 @@ if __name__ == "__main__":
 
     df["generation"] = all_generations
     df.to_json(f"{args.output}/output_intermediate.jsonl", orient='records', lines=True)
-
     print(f"\nSaved intermediate results to {args.output}/output_intermediate.jsonl")
 
     df["prediction"] = df.generation.apply(extract_answer)
