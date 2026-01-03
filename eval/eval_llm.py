@@ -7,49 +7,62 @@ if __name__ == "__main__":
     import pandas as pd
     import numpy as np
     from vllm import LLM, SamplingParams
-    from tqdm import tqdm
     import argparse
-    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
+    # ---------- helpers ----------
+    def chunk_indices(indices, chunk_size=2):
+        for i in range(0, len(indices), chunk_size):
+            yield indices[i:i + chunk_size]
+
+    def extract_prediction(text):
+        t = text.lower()
+        if any(x in t for x in [
+            "\\boxed{proved}", "\\boxed{\\text{proved}}",
+            "\\boxed{true}", "\\boxed{\\text{true}}"
+        ]):
+            return 1
+        if any(x in t for x in [
+            "\\boxed{disproved}", "\\boxed{\\text{disproved}}",
+            "\\boxed{false}", "\\boxed{\\text{false}}"
+        ]):
+            return 0
+        return -1
+
+    # ---------- args ----------
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
     parser.add_argument("--output", type=str, default="fimo")
-    parser.add_argument("--timeout", type=int, default=120)
-    parser.add_argument("--batch_size", type=int, default=10, help="Number of prompts to generate at once")
-    parser.add_argument("--print_batch_size", type=int, default=10, help="Print accuracy every N generations")
-    parser.add_argument("--limit", type=int, default=None, help="Only process first N rows")
-    parser.add_argument("--limit_problems", type=int, default=None, help="Only process first N unique problems (all their variants)")
-    parser.add_argument("--problem_name", type=str, default=None, help="Only process specific problem by name (all its variants)")
-    parser.add_argument("--print_proofs", action="store_true", help="Print generated proofs to console")
+    parser.add_argument("--batch_size", type=int, default=10)
+    parser.add_argument("--print_batch_size", type=int, default=10)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--limit_problems", type=int, default=None)
+    parser.add_argument("--problem_name", type=str, default=None)
+    parser.add_argument("--print_proofs", action="store_true")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
 
+    # ---------- load data ----------
     df = pd.read_json(args.data, lines=True)
-    
-    # Apply filtering based on arguments
+
     if args.problem_name is not None:
         df = df[df.problem_name == args.problem_name].reset_index(drop=True)
-        if len(df) == 0:
-            print(f"ERROR: No problem found with name '{args.problem_name}'")
-            print(f"Available problems: {sorted(pd.read_json(args.data, lines=True).problem_name.unique())}")
-            exit(1)
         print(f"Processing problem '{args.problem_name}' with {len(df)} variants")
     elif args.limit_problems is not None:
-        unique_problems = df.problem_name.unique()[:args.limit_problems]
-        df = df[df.problem_name.isin(unique_problems)].reset_index(drop=True)
-        print(f"Processing first {args.limit_problems} problems ({len(df)} total variants)")
+        problems = df.problem_name.unique()[:args.limit_problems]
+        df = df[df.problem_name.isin(problems)].reset_index(drop=True)
+        print(f"Processing first {args.limit_problems} problems ({len(df)} variants)")
     elif args.limit is not None:
         df = df.iloc[:args.limit].reset_index(drop=True)
-        print(f"Processing first {args.limit} rows")
-    
-    print(f"Total rows to process: {len(df)}")
-    print(f"Unique problems: {df.problem_name.nunique()}")
-    
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
 
+    print(f"Total rows: {len(df)}")
+    print(f"Unique problems: {df.problem_name.nunique()}")
+
+    # ---------- tokenizer ----------
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
     prompts = []
+
     for p in df.prompt:
         messages = [{"role": "user", "content": p}]
         text = tokenizer.apply_chat_template(
@@ -59,9 +72,7 @@ if __name__ == "__main__":
         )
         prompts.append(text)
 
-    total_prompts = len(prompts)
-    print(f"Total prompts to process: {total_prompts}")
-
+    # ---------- model ----------
     model = LLM(
         model=args.model,
         dtype=torch.float16,
@@ -75,120 +86,73 @@ if __name__ == "__main__":
         max_tokens=16000
     )
 
-    # Process prompts in batches for better progress tracking
+    # ---------- generation ----------
     generation = []
-    print(f"Processing in batches of {args.batch_size}...")
-    
+    total_prompts = len(prompts)
+
     for batch_start in range(0, total_prompts, args.batch_size):
         batch_end = min(batch_start + args.batch_size, total_prompts)
         batch_prompts = prompts[batch_start:batch_end]
-        batch_size = len(batch_prompts)
-        
-        print(f"\nGenerating batch [{batch_start+1}-{batch_end}] / {total_prompts}...")
+
+        print(f"\nGenerating [{batch_start+1}-{batch_end}] / {total_prompts}")
         outputs = model.generate(batch_prompts, sampling_params)
-        
+
         for i, output in enumerate(outputs):
             idx = batch_start + i
             gen_text = output.outputs[0].text
             generation.append((idx, gen_text))
-            processed = len(generation)
 
-            # Print proof if flag is set or if testing single problem/small dataset
-            if args.print_proofs or args.problem_name or args.limit_problems == 1 or (args.limit and args.limit <= 5):
-                print("\n" + "="*80)
-                print(f"PROBLEM #{idx + 1}: {df.iloc[idx]['problem_name']}")
+            if args.print_proofs:
                 print("="*80)
-                print("PROMPT:")
-                print(df.iloc[idx]['prompt'][:500] + "..." if len(df.iloc[idx]['prompt']) > 500 else df.iloc[idx]['prompt'])
-                print("\n" + "-"*80)
-                print("GENERATED PROOF:")
+                print(f"{df.iloc[idx]['problem_name']}")
                 print(gen_text)
-                print("-"*80)
-                
-                # Extract prediction - more flexible matching
-                gen_lower = gen_text.lower()
-                if "\\boxed{proved}" in gen_lower or "\\boxed{\\text{proved}}" in gen_lower or "\\boxed{true}" in gen_lower or "\\boxed{\\text{true}}" in gen_lower:
-                    prediction = 1
-                elif "\\boxed{disproved}" in gen_lower or "\\boxed{\\text{disproved}}" in gen_lower or "\\boxed{false}" in gen_lower or "\\boxed{\\text{false}}" in gen_lower:
-                    prediction = 0
-                else:
-                    prediction = -1
-                
-                answer = df.iloc[idx]['answer']
-                correct = prediction == answer
-                
-                print(f"CORRECT ANSWER: {'proved' if answer == 1 else 'disproved'}")
-                print(f"MODEL PREDICTION: {'proved' if prediction == 1 else ('disproved' if prediction == 0 else 'NONE')}")
-                print(f"RESULT: {'✓ CORRECT' if correct else '✗ INCORRECT'}")
-                print("="*80 + "\n")
+                print("="*80)
 
-        # Show interim accuracy after each batch
+        # ---------- interim scoring ----------
         if batch_end % args.print_batch_size == 0 or batch_end == total_prompts:
-            # Sort by index to maintain order
-            generation_sorted = sorted(generation, key=lambda x: x[0])
-            gen_texts = [g[1] for g in generation_sorted]
-            
-            df_partial = df.iloc[:processed].copy()
-            df_partial["generation"] = gen_texts
+            gen_sorted = sorted(generation, key=lambda x: x[0])
+            gen_texts = [g[1] for g in gen_sorted]
 
-            df_partial["prediction"] = df_partial.generation.apply(
-                lambda s: 1 if any(x in s.lower() for x in ["\\boxed{proved}", "\\boxed{\\text{proved}}", "\\boxed{true}", "\\boxed{\\text{true}}"])
-                else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
-            )
+            df_partial = df.iloc[:len(gen_texts)].copy()
+            df_partial["generation"] = gen_texts
+            df_partial["prediction"] = df_partial.generation.apply(extract_prediction)
 
             accs = []
             for p in df_partial.problem_name.unique():
                 df_prob = df_partial[df_partial.problem_name == p]
-                all_correct = (df_prob.answer == df_prob.prediction).all()
-                accs.append(all_correct)
-                
-                # If testing specific problem, show per-problem results
-                if args.problem_name:
-                    variants_correct = (df_prob.answer == df_prob.prediction).sum()
-                    total_variants = len(df_prob)
-                    status = "✓ ALL VARIANTS CORRECT" if all_correct else f"✗ {variants_correct}/{total_variants} variants correct"
-                    print(f"\nProblem '{p}': {status}")
+                idxs = df_prob.index.tolist()
 
-            score = round(np.mean(accs) * 100, 4)
-            print(f"[{processed}/{total_prompts}] Interim outcome score: {score}%")
-    # Sort final generation by index
+                for chunk in chunk_indices(idxs, 2):
+                    df_chunk = df_prob.loc[chunk]
+                    accs.append((df_chunk.answer == df_chunk.prediction).all())
+
+            print(f"[{len(gen_texts)}/{total_prompts}] Interim score: {round(np.mean(accs)*100, 4)}%")
+
+    # ---------- final results ----------
     generation_sorted = sorted(generation, key=lambda x: x[0])
-    gen_texts = [g[1] for g in generation_sorted]
-    
-    df["generation"] = gen_texts
+    df["generation"] = [g[1] for g in generation_sorted]
+    df["prediction"] = df.generation.apply(extract_prediction)
+
     df.to_json(
         f"{args.output}/output.jsonl",
         orient="records",
         lines=True
     )
 
-    df["prediction"] = df.generation.apply(
-        lambda s: 1 if any(x in s.lower() for x in ["\\boxed{proved}", "\\boxed{\\text{proved}}", "\\boxed{true}", "\\boxed{\\text{true}}"])
-        else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
-    )
-
     accs = []
     for p in df.problem_name.unique():
         df_prob = df[df.problem_name == p]
-        all_correct = (df_prob.answer == df_prob.prediction).all()
-        accs.append(all_correct)
+        idxs = df_prob.index.tolist()
+
+        for chunk in chunk_indices(idxs, 2):
+            df_chunk = df_prob.loc[chunk]
+            accs.append((df_chunk.answer == df_chunk.prediction).all())
 
     score = round(np.mean(accs) * 100, 4)
-    print(f"\n{'='*80}")
-    print(f"FINAL RESULTS")
-    print(f"{'='*80}")
-    
-    # Show detailed breakdown for specific problem or small problem sets
-    if args.problem_name or (args.limit_problems and args.limit_problems <= 5):
-        for p in df.problem_name.unique():
-            df_prob = df[df.problem_name == p]
-            all_correct = (df_prob.answer == df_prob.prediction).all()
-            variants_correct = (df_prob.answer == df_prob.prediction).sum()
-            total_variants = len(df_prob)
-            status = "✓ ALL VARIANTS CORRECT" if all_correct else f"✗ ONLY {variants_correct}/{total_variants} CORRECT"
-            print(f"Problem '{p}': {status}")
-        print(f"{'='*80}")
-    
+
+    print("\n" + "="*80)
+    print("FINAL RESULTS")
+    print("="*80)
     print(f"Final outcome score: {score}%")
-    print(f"Problems solved: {sum(accs)}/{len(accs)}")
-    print(f"{'='*80}")
+    print(f"Variant-groups solved: {sum(accs)}/{len(accs)}")
+    print("="*80)
