@@ -18,6 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--batch_size", type=int, default=10, help="Print accuracy every N generations")
     parser.add_argument("--limit", type=int, default=None, help="Only process first N problems")
+    parser.add_argument("--print_proofs", action="store_true", help="Print generated proofs to console")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -77,17 +78,44 @@ if __name__ == "__main__":
             total=total_prompts,
             desc="Generations"
         ):
+            idx = future_to_idx[future]
             try:
                 gen_text = future.result(timeout=args.timeout)
             except TimeoutError:
                 gen_text = "TIMEOUT"
 
-            generation.append(gen_text)
+            generation.append((idx, gen_text))
             processed = len(generation)
 
+            # Print proof if flag is set
+            if args.print_proofs or args.limit == 1:
+                print("\n" + "="*80)
+                print(f"PROBLEM #{idx + 1}: {df.iloc[idx]['problem_name']}")
+                print("="*80)
+                print("PROMPT:")
+                print(df.iloc[idx]['prompt'][:500] + "..." if len(df.iloc[idx]['prompt']) > 500 else df.iloc[idx]['prompt'])
+                print("\n" + "-"*80)
+                print("GENERATED PROOF:")
+                print(gen_text)
+                print("-"*80)
+                
+                # Extract prediction
+                prediction = 1 if "\\boxed{proved}" in gen_text.lower() else (0 if "\\boxed{disproved}" in gen_text.lower() else -1)
+                answer = df.iloc[idx]['answer']
+                correct = prediction == answer
+                
+                print(f"CORRECT ANSWER: {'proved' if answer == 1 else 'disproved'}")
+                print(f"MODEL PREDICTION: {'proved' if prediction == 1 else ('disproved' if prediction == 0 else 'NONE')}")
+                print(f"RESULT: {'✓ CORRECT' if correct else '✗ INCORRECT'}")
+                print("="*80 + "\n")
+
             if processed % args.batch_size == 0 or processed == total_prompts:
+                # Sort by index to maintain order
+                generation_sorted = sorted(generation, key=lambda x: x[0])
+                gen_texts = [g[1] for g in generation_sorted]
+                
                 df_partial = df.iloc[:processed].copy()
-                df_partial["generation"] = generation
+                df_partial["generation"] = gen_texts
 
                 df_partial["prediction"] = df_partial.generation.apply(
                     lambda s: 1 if "\\boxed{proved}" in s.lower()
@@ -105,7 +133,11 @@ if __name__ == "__main__":
                 score = round(np.mean(accs) * 100, 4)
                 print(f"[{processed}/{total_prompts}] Interim outcome score: {score}%")
 
-    df["generation"] = generation
+    # Sort final generation by index
+    generation_sorted = sorted(generation, key=lambda x: x[0])
+    gen_texts = [g[1] for g in generation_sorted]
+    
+    df["generation"] = gen_texts
     df.to_json(
         f"{args.output}/output.jsonl",
         orient="records",
@@ -126,4 +158,4 @@ if __name__ == "__main__":
     ]
 
     score = round(np.mean(accs) * 100, 4)
-    print(f"Final outcome score on fimo: {score}%")
+    print(f"\nFinal outcome score on fimo: {score}%")
