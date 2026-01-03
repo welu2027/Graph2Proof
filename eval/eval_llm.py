@@ -74,65 +74,46 @@ if __name__ == "__main__":
         max_tokens=16000
     )
 
-    def generate_prompt(text):
-        try:
-            out = model.generate([text], sampling_params)
-            return out[0].outputs[0].text
-        except Exception:
-            return "ERROR"
-
+    # Generate all prompts at once (vLLM handles batching efficiently)
+    print("Generating proofs...")
+    outputs = model.generate(prompts, sampling_params)
+    
     generation = []
+    for idx, output in enumerate(tqdm(outputs, desc="Processing outputs")):
+        gen_text = output.outputs[0].text
+        generation.append((idx, gen_text))
+        processed = len(generation)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_to_idx = {
-            executor.submit(generate_prompt, p): i
-            for i, p in enumerate(prompts)
-        }
+        # Print proof if flag is set or if testing single problem/small dataset
+        if args.print_proofs or args.problem_name or args.limit_problems == 1 or (args.limit and args.limit <= 5):
+            print("\n" + "="*80)
+            print(f"PROBLEM #{idx + 1}: {df.iloc[idx]['problem_name']}")
+            print("="*80)
+            print("PROMPT:")
+            print(df.iloc[idx]['prompt'][:500] + "..." if len(df.iloc[idx]['prompt']) > 500 else df.iloc[idx]['prompt'])
+            print("\n" + "-"*80)
+            print("GENERATED PROOF:")
+            print(gen_text)
+            print("-"*80)
+            
+            # Extract prediction - more flexible matching
+            gen_lower = gen_text.lower()
+            if "\\boxed{proved}" in gen_lower or "\\boxed{\\text{proved}}" in gen_lower or "\\boxed{true}" in gen_lower or "\\boxed{\\text{true}}" in gen_lower:
+                prediction = 1
+            elif "\\boxed{disproved}" in gen_lower or "\\boxed{\\text{disproved}}" in gen_lower or "\\boxed{false}" in gen_lower or "\\boxed{\\text{false}}" in gen_lower:
+                prediction = 0
+            else:
+                prediction = -1
+            
+            answer = df.iloc[idx]['answer']
+            correct = prediction == answer
+            
+            print(f"CORRECT ANSWER: {'proved' if answer == 1 else 'disproved'}")
+            print(f"MODEL PREDICTION: {'proved' if prediction == 1 else ('disproved' if prediction == 0 else 'NONE')}")
+            print(f"RESULT: {'✓ CORRECT' if correct else '✗ INCORRECT'}")
+            print("="*80 + "\n")
 
-        for future in tqdm(
-            as_completed(future_to_idx),
-            total=total_prompts,
-            desc="Generations"
-        ):
-            idx = future_to_idx[future]
-            try:
-                gen_text = future.result(timeout=args.timeout)
-            except TimeoutError:
-                gen_text = "TIMEOUT"
-
-            generation.append((idx, gen_text))
-            processed = len(generation)
-
-            # Print proof if flag is set or if testing single problem/small dataset
-            if args.print_proofs or args.problem_name or args.limit_problems == 1 or (args.limit and args.limit <= 5):
-                print("\n" + "="*80)
-                print(f"PROBLEM #{idx + 1}: {df.iloc[idx]['problem_name']}")
-                print("="*80)
-                print("PROMPT:")
-                print(df.iloc[idx]['prompt'][:500] + "..." if len(df.iloc[idx]['prompt']) > 500 else df.iloc[idx]['prompt'])
-                print("\n" + "-"*80)
-                print("GENERATED PROOF:")
-                print(gen_text)
-                print("-"*80)
-                
-                # Extract prediction - more flexible matching
-                gen_lower = gen_text.lower()
-                if "\\boxed{proved}" in gen_lower or "\\boxed{\\text{proved}}" in gen_lower or "\\boxed{true}" in gen_lower or "\\boxed{\\text{true}}" in gen_lower:
-                    prediction = 1
-                elif "\\boxed{disproved}" in gen_lower or "\\boxed{\\text{disproved}}" in gen_lower or "\\boxed{false}" in gen_lower or "\\boxed{\\text{false}}" in gen_lower:
-                    prediction = 0
-                else:
-                    prediction = -1
-                
-                answer = df.iloc[idx]['answer']
-                correct = prediction == answer
-                
-                print(f"CORRECT ANSWER: {'proved' if answer == 1 else 'disproved'}")
-                print(f"MODEL PREDICTION: {'proved' if prediction == 1 else ('disproved' if prediction == 0 else 'NONE')}")
-                print(f"RESULT: {'✓ CORRECT' if correct else '✗ INCORRECT'}")
-                print("="*80 + "\n")
-
-            if processed % args.batch_size == 0 or processed == total_prompts:
+        if processed % args.batch_size == 0 or processed == total_prompts:
                 # Sort by index to maintain order
                 generation_sorted = sorted(generation, key=lambda x: x[0])
                 gen_texts = [g[1] for g in generation_sorted]
@@ -160,7 +141,6 @@ if __name__ == "__main__":
 
                 score = round(np.mean(accs) * 100, 4)
                 print(f"[{processed}/{total_prompts}] Interim outcome score: {score}%")
-
     # Sort final generation by index
     generation_sorted = sorted(generation, key=lambda x: x[0])
     gen_texts = [g[1] for g in generation_sorted]
