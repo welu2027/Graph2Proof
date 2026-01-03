@@ -99,8 +99,15 @@ if __name__ == "__main__":
                 print(gen_text)
                 print("-"*80)
                 
-                # Extract prediction
-                prediction = 1 if "\\boxed{proved}" in gen_text.lower() else (0 if "\\boxed{disproved}" in gen_text.lower() else -1)
+                # Extract prediction - more flexible matching
+                gen_lower = gen_text.lower()
+                if "\\boxed{proved}" in gen_lower or "\\boxed{\\text{proved}}" in gen_lower or "\\boxed{true}" in gen_lower or "\\boxed{\\text{true}}" in gen_lower:
+                    prediction = 1
+                elif "\\boxed{disproved}" in gen_lower or "\\boxed{\\text{disproved}}" in gen_lower or "\\boxed{false}" in gen_lower or "\\boxed{\\text{false}}" in gen_lower:
+                    prediction = 0
+                else:
+                    prediction = -1
+                
                 answer = df.iloc[idx]['answer']
                 correct = prediction == answer
                 
@@ -118,8 +125,8 @@ if __name__ == "__main__":
                 df_partial["generation"] = gen_texts
 
                 df_partial["prediction"] = df_partial.generation.apply(
-                    lambda s: 1 if "\\boxed{proved}" in s.lower()
-                    else (0 if "\\boxed{disproved}" in s.lower() else -1)
+                    lambda s: 1 if any(x in s.lower() for x in ["\\boxed{proved}", "\\boxed{\\text{proved}}", "\\boxed{true}", "\\boxed{\\text{true}}"])
+                    else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
                 )
 
                 accs = [
@@ -145,8 +152,8 @@ if __name__ == "__main__":
     )
 
     df["prediction"] = df.generation.apply(
-        lambda s: 1 if "\\boxed{proved}" in s.lower()
-        else (0 if "\\boxed{disproved}" in s.lower() else -1)
+        lambda s: 1 if any(x in s.lower() for x in ["\\boxed{proved}", "\\boxed{\\text{proved}}", "\\boxed{true}", "\\boxed{\\text{true}}"])
+        else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
     )
 
     accs = [
