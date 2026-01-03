@@ -17,11 +17,18 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="fimo")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--batch_size", type=int, default=10, help="Print accuracy every N generations")
+    parser.add_argument("--limit", type=int, default=None, help="Only process first N problems")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
 
     df = pd.read_json(args.data, lines=True)
+    
+    # Apply limit if specified
+    if args.limit is not None:
+        df = df.iloc[:args.limit].reset_index(drop=True)
+        print(f"Limiting to first {args.limit} problems")
+    
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     prompts = []
@@ -35,6 +42,7 @@ if __name__ == "__main__":
         prompts.append(text)
 
     total_prompts = len(prompts)
+    print(f"Total prompts to process: {total_prompts}")
 
     model = LLM(
         model=args.model,
