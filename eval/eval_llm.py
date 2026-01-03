@@ -11,9 +11,6 @@ if __name__ == "__main__":
     import argparse
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
-    # =====================
-    # Arguments
-    # =====================
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data", type=str, default="eval/data/fimo.jsonl")
@@ -24,9 +21,6 @@ if __name__ == "__main__":
 
     os.makedirs(args.output, exist_ok=True)
 
-    # =====================
-    # Load data
-    # =====================
     df = pd.read_json(args.data, lines=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
@@ -42,9 +36,6 @@ if __name__ == "__main__":
 
     total_prompts = len(prompts)
 
-    # =====================
-    # Load model
-    # =====================
     model = LLM(
         model=args.model,
         dtype=torch.float16,
@@ -58,9 +49,6 @@ if __name__ == "__main__":
         max_tokens=16000
     )
 
-    # =====================
-    # Generation function
-    # =====================
     def generate_prompt(text):
         try:
             out = model.generate([text], sampling_params)
@@ -68,9 +56,6 @@ if __name__ == "__main__":
         except Exception:
             return "ERROR"
 
-    # =====================
-    # Run generations
-    # =====================
     generation = []
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -92,9 +77,6 @@ if __name__ == "__main__":
             generation.append(gen_text)
             processed = len(generation)
 
-            # =====================
-            # Periodic accuracy logging
-            # =====================
             if processed % args.batch_size == 0 or processed == total_prompts:
                 df_partial = df.iloc[:processed].copy()
                 df_partial["generation"] = generation
@@ -115,9 +97,6 @@ if __name__ == "__main__":
                 score = round(np.mean(accs) * 100, 4)
                 print(f"[{processed}/{total_prompts}] Interim outcome score: {score}%")
 
-    # =====================
-    # Save outputs
-    # =====================
     df["generation"] = generation
     df.to_json(
         f"{args.output}/output.jsonl",
@@ -125,9 +104,6 @@ if __name__ == "__main__":
         lines=True
     )
 
-    # =====================
-    # Final accuracy
-    # =====================
     df["prediction"] = df.generation.apply(
         lambda s: 1 if "\\boxed{proved}" in s.lower()
         else (0 if "\\boxed{disproved}" in s.lower() else -1)
