@@ -17,7 +17,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="fimo")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--batch_size", type=int, default=10, help="Print accuracy every N generations")
-    parser.add_argument("--limit", type=int, default=None, help="Only process first N problems")
+    parser.add_argument("--limit", type=int, default=None, help="Only process first N rows")
+    parser.add_argument("--limit_problems", type=int, default=None, help="Only process first N unique problems (all their variants)")
+    parser.add_argument("--problem_name", type=str, default=None, help="Only process specific problem by name (all its variants)")
     parser.add_argument("--print_proofs", action="store_true", help="Print generated proofs to console")
     args = parser.parse_args()
 
@@ -25,10 +27,24 @@ if __name__ == "__main__":
 
     df = pd.read_json(args.data, lines=True)
     
-    # Apply limit if specified
-    if args.limit is not None:
+    # Apply filtering based on arguments
+    if args.problem_name is not None:
+        df = df[df.problem_name == args.problem_name].reset_index(drop=True)
+        if len(df) == 0:
+            print(f"ERROR: No problem found with name '{args.problem_name}'")
+            print(f"Available problems: {sorted(pd.read_json(args.data, lines=True).problem_name.unique())}")
+            exit(1)
+        print(f"Processing problem '{args.problem_name}' with {len(df)} variants")
+    elif args.limit_problems is not None:
+        unique_problems = df.problem_name.unique()[:args.limit_problems]
+        df = df[df.problem_name.isin(unique_problems)].reset_index(drop=True)
+        print(f"Processing first {args.limit_problems} problems ({len(df)} total variants)")
+    elif args.limit is not None:
         df = df.iloc[:args.limit].reset_index(drop=True)
-        print(f"Limiting to first {args.limit} problems")
+        print(f"Processing first {args.limit} rows")
+    
+    print(f"Total rows to process: {len(df)}")
+    print(f"Unique problems: {df.problem_name.nunique()}")
     
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
@@ -87,8 +103,8 @@ if __name__ == "__main__":
             generation.append((idx, gen_text))
             processed = len(generation)
 
-            # Print proof if flag is set
-            if args.print_proofs or args.limit == 1:
+            # Print proof if flag is set or if testing single problem/small dataset
+            if args.print_proofs or args.problem_name or args.limit_problems == 1 or (args.limit and args.limit <= 5):
                 print("\n" + "="*80)
                 print(f"PROBLEM #{idx + 1}: {df.iloc[idx]['problem_name']}")
                 print("="*80)
@@ -129,13 +145,18 @@ if __name__ == "__main__":
                     else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
                 )
 
-                accs = [
-                    (
-                        df_partial[df_partial.problem_name == p].answer
-                        == df_partial[df_partial.problem_name == p].prediction
-                    ).all()
-                    for p in df_partial.problem_name.unique()
-                ]
+                accs = []
+                for p in df_partial.problem_name.unique():
+                    df_prob = df_partial[df_partial.problem_name == p]
+                    all_correct = (df_prob.answer == df_prob.prediction).all()
+                    accs.append(all_correct)
+                    
+                    # If testing specific problem, show per-problem results
+                    if args.problem_name:
+                        variants_correct = (df_prob.answer == df_prob.prediction).sum()
+                        total_variants = len(df_prob)
+                        status = "✓ ALL VARIANTS CORRECT" if all_correct else f"✗ {variants_correct}/{total_variants} variants correct"
+                        print(f"\nProblem '{p}': {status}")
 
                 score = round(np.mean(accs) * 100, 4)
                 print(f"[{processed}/{total_prompts}] Interim outcome score: {score}%")
@@ -156,13 +177,28 @@ if __name__ == "__main__":
         else (0 if any(x in s.lower() for x in ["\\boxed{disproved}", "\\boxed{\\text{disproved}}", "\\boxed{false}", "\\boxed{\\text{false}}"]) else -1)
     )
 
-    accs = [
-        (
-            df[df.problem_name == p].answer
-            == df[df.problem_name == p].prediction
-        ).all()
-        for p in df.problem_name.unique()
-    ]
+    accs = []
+    for p in df.problem_name.unique():
+        df_prob = df[df.problem_name == p]
+        all_correct = (df_prob.answer == df_prob.prediction).all()
+        accs.append(all_correct)
 
     score = round(np.mean(accs) * 100, 4)
-    print(f"\nFinal outcome score on fimo: {score}%")
+    print(f"\n{'='*80}")
+    print(f"FINAL RESULTS")
+    print(f"{'='*80}")
+    
+    # Show detailed breakdown for specific problem or small problem sets
+    if args.problem_name or (args.limit_problems and args.limit_problems <= 5):
+        for p in df.problem_name.unique():
+            df_prob = df[df.problem_name == p]
+            all_correct = (df_prob.answer == df_prob.prediction).all()
+            variants_correct = (df_prob.answer == df_prob.prediction).sum()
+            total_variants = len(df_prob)
+            status = "✓ ALL VARIANTS CORRECT" if all_correct else f"✗ ONLY {variants_correct}/{total_variants} CORRECT"
+            print(f"Problem '{p}': {status}")
+        print(f"{'='*80}")
+    
+    print(f"Final outcome score: {score}%")
+    print(f"Problems solved: {sum(accs)}/{len(accs)}")
+    print(f"{'='*80}")
