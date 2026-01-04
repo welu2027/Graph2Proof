@@ -132,7 +132,7 @@ if __name__ == "__main__":
     generation_sorted = sorted(generation, key=lambda x: x[0])
     df["generation"] = [g[1] for g in generation_sorted]
     df["prediction"] = df.generation.apply(extract_prediction)
-
+ 
     df.to_json(
         f"{args.output}/output.jsonl",
         orient="records",
