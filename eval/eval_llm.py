@@ -1,5 +1,6 @@
 if __name__ == "__main__":
     import os
+    import time
     os.environ["VLLM_ATTENTION_BACKEND"] = "TRITON_ATTN"
 
     from transformers import AutoTokenizer
@@ -10,10 +11,6 @@ if __name__ == "__main__":
     import argparse
 
     # ---------- helpers ----------
-    def chunk_indices(indices, chunk_size=2):
-        for i in range(0, len(indices), chunk_size):
-            yield indices[i:i + chunk_size]
-
     def extract_prediction(text):
         t = text.lower()
         if any(x in t for x in [
@@ -90,6 +87,8 @@ if __name__ == "__main__":
     generation = []
     total_prompts = len(prompts)
 
+    start_time = time.time()
+
     for batch_start in range(0, total_prompts, args.batch_size):
         batch_end = min(batch_start + args.batch_size, total_prompts)
         batch_prompts = prompts[batch_start:batch_end]
@@ -120,11 +119,9 @@ if __name__ == "__main__":
             accs = []
             for p in df_partial.problem_name.unique():
                 df_prob = df_partial[df_partial.problem_name == p]
-                idxs = df_prob.index.tolist()
-
-                for chunk in chunk_indices(idxs, 2):
-                    df_chunk = df_prob.loc[chunk]
-                    accs.append((df_chunk.answer == df_chunk.prediction).all())
+                # ---- chunking removed ----
+                df_chunk = df_prob
+                accs.append((df_chunk.answer == df_chunk.prediction).all())
 
             print(f"[{len(gen_texts)}/{total_prompts}] Interim score: {round(np.mean(accs)*100, 4)}%")
 
@@ -142,17 +139,17 @@ if __name__ == "__main__":
     accs = []
     for p in df.problem_name.unique():
         df_prob = df[df.problem_name == p]
-        idxs = df_prob.index.tolist()
-
-        for chunk in chunk_indices(idxs, 2):
-            df_chunk = df_prob.loc[chunk]
-            accs.append((df_chunk.answer == df_chunk.prediction).all())
+        # ---- chunking removed ----
+        df_chunk = df_prob
+        accs.append((df_chunk.answer == df_chunk.prediction).all())
 
     score = round(np.mean(accs) * 100, 4)
+    end_time = time.time()
 
     print("\n" + "="*80)
     print("FINAL RESULTS")
     print("="*80)
     print(f"Final outcome score: {score}%")
     print(f"Variant-groups solved: {sum(accs)}/{len(accs)}")
+    print(f"Total runtime: {round(end_time - start_time, 2)} seconds")
     print("="*80)
